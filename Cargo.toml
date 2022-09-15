@@ -1,0 +1,14 @@
+[package]
+name = "spam"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+lettre = "0.10.1"
+tokio = { version = "1.21.1", features = ["full"] }
+tokio-postgres = "0.7.7"
+
+[build-dependencies]
+dotenv-build = "0.1.1"
