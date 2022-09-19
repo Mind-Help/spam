@@ -2,10 +2,30 @@ use std::str::FromStr;
 
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
-use tokio_postgres::{Config, Error, NoTls};
+use tokio_postgres::{Client, Config, Error, NoTls};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+	let mailer = SmtpTransport::relay(env!("SMTP_HOST"))
+		.unwrap()
+		.credentials(Credentials::new(
+			env!("SMTP_USERNAME").to_string(),
+			env!("SMTP_PASSWD").to_string(),
+		))
+		.build();
+
+	let client = get_db_client().await?;
+
+	client
+		.query(r#"SELECT "User".email FROM "User";"#, &[])
+		.await?
+		.iter()
+		.for_each(|row| send_mail(row.get::<usize, &str>(0), &mailer));
+
+	Ok(())
+}
+
+async fn get_db_client() -> Result<Client, Error> {
 	let config = Config::from_str(env!("DATABASE_URL")).unwrap();
 	let (client, connection) = config.connect(NoTls).await?;
 
@@ -15,18 +35,10 @@ async fn main() -> Result<(), Error> {
 		}
 	});
 
-	let emails = client
-		.query(r#"SELECT "User".email FROM "User";"#, &[])
-		.await?;
-
-	emails
-		.iter()
-		.for_each(|email| println!("{}", email.get::<usize, &str>(0)));
-
-	Ok(())
+	Ok(client)
 }
 
-fn send_mail(email: &str) {
+fn send_mail(email: &str, mailer: &SmtpTransport) {
 	let message = Message::builder()
 		.from(
 			format!("Mind Help <{}>", env!("OUR_EMAIL"))
@@ -38,16 +50,6 @@ fn send_mail(email: &str) {
 		.subject("Happy new year")
 		.body(String::from("Be happy!"))
 		.unwrap();
-
-	let creds = Credentials::new(
-		env!("SMTP_USERNAME").to_string(),
-		env!("SMTP_PASSWD").to_string(),
-	);
-
-	let mailer = SmtpTransport::relay(env!("SMTP_HOST"))
-		.unwrap()
-		.credentials(creds)
-		.build();
 
 	match mailer.send(&message) {
 		Ok(_) => println!("Email sent successfully!"),
