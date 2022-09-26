@@ -2,6 +2,7 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
+use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
 use tokio_postgres::Error;
 use warp::Filter;
@@ -14,6 +15,9 @@ async fn main() -> Result<(), Error> {
 			env!("SMTP_USERNAME").to_string(),
 			env!("SMTP_PASSWD").to_string(),
 		))
+		.tls(Tls::Opportunistic(
+			TlsParameters::new(env!("DOMAIN").to_string()).unwrap(),
+		))
 		.authentication(vec![Mechanism::Login])
 		.port(
 			env!("SMTP_PORT")
@@ -22,10 +26,14 @@ async fn main() -> Result<(), Error> {
 		)
 		.build();
 
-	warp::serve(warp::path!("send_mail").map(move || {
-		send_mail("", &mailer);
-		"ok"
-	}))
+	warp::serve(
+		warp::path!("send_mail")
+			.map(move || {
+				send_mail("", &mailer);
+				"ok"
+			})
+			.with(warp::cors().allow_any_origin()),
+	)
 	.run((
 		IpAddr::from_str("::0").unwrap(),
 		env!("PORT")
