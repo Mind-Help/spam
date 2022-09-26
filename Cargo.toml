@@ -9,6 +9,7 @@ edition = "2021"
 lettre = "0.10.1"
 tokio = { version = "1.21.1", features = ["full"] }
 tokio-postgres = "0.7.7"
+warp = "0.3.2"
 
 [build-dependencies]
 dotenv-build = "0.1.1"
