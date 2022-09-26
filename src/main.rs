@@ -4,7 +4,7 @@ use std::str::FromStr;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
-use tokio_postgres::Error;
+use tokio_postgres::{Client, Config, Error, NoTls};
 use warp::Filter;
 
 #[tokio::main]
@@ -15,7 +15,7 @@ async fn main() -> Result<(), Error> {
 			env!("SMTP_USERNAME").to_string(),
 			env!("SMTP_PASSWD").to_string(),
 		))
-		.tls(Tls::Opportunistic(
+		.tls(Tls::Required(
 			TlsParameters::new(env!("DOMAIN").to_string()).unwrap(),
 		))
 		.authentication(vec![Mechanism::Login])
@@ -26,10 +26,25 @@ async fn main() -> Result<(), Error> {
 		)
 		.build();
 
+	let client = get_db_client().await?;
+
+	let data: Vec<(String, String)> = client
+		.query(r#"SELECT "User".name, "User".email FROM "User";"#, &[])
+		.await?
+		.iter()
+		.map(|row| {
+			(
+				row.get::<usize, &str>(0).to_string(),
+				row.get::<usize, &str>(1).to_string(),
+			)
+		})
+		.collect();
+
 	warp::serve(
 		warp::path!("send_mail")
 			.map(move || {
-				send_mail("", &mailer);
+				data.iter()
+					.for_each(|(name, email)| send_mail(name, email, &mailer));
 				"ok"
 			})
 			.with(warp::cors().allow_any_origin()),
@@ -43,17 +58,9 @@ async fn main() -> Result<(), Error> {
 	.await;
 
 	Ok(())
-
-	/*let client = get_db_client().await?;
-
-	client
-		.query(r#"SELECT "User".email FROM "User";"#, &[])
-		.await?
-		.iter()
-		.for_each(|row| send_mail(row.get::<usize, &str>(0), &mailer));*/
 }
 
-/*async fn get_db_client() -> Result<Client, Error> {
+async fn get_db_client() -> Result<Client, Error> {
 	let config = Config::from_str(env!("DATABASE_URL")).unwrap();
 	let (client, connection) = config.connect(NoTls).await?;
 
@@ -65,22 +72,22 @@ async fn main() -> Result<(), Error> {
 
 	Ok(client)
 }
-*/
 
-fn send_mail(_email: &str, mailer: &SmtpTransport) {
+fn send_mail(name: &str, email: &str, mailer: &SmtpTransport) {
+	let template = include_str!("../template.html").replace("${nome}", name);
 	let message = Message::builder()
 		.from(
 			format!("Mind Help <{}>", env!("OUR_EMAIL"))
 				.parse()
 				.unwrap(),
 		)
-		.to("Hei <augustomp@concordiasl.com.br>".parse().unwrap())
+		.to(format!("Hei <{}>", email).parse().unwrap())
 		.subject("Happy new year")
-		.body(String::from("Be happy!"))
+		.body(template)
 		.unwrap();
 
 	match mailer.send(&message) {
 		Ok(_) => println!("Email sent successfully!"),
-		Err(e) => panic!("Could not send email: {:?}", e),
+		Err(e) => panic!("Could not send email: {e:?}"),
 	}
 }
