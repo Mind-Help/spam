@@ -1,11 +1,15 @@
 use std::net::IpAddr;
 use std::str::FromStr;
 
+use lettre::message::header::ContentType;
+use lettre::message::SinglePart;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
 use tokio_postgres::{Client, Config, Error, NoTls};
 use warp::Filter;
+
+static TEMPLATE: &str = include_str!("../template.html");
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -27,7 +31,6 @@ async fn main() -> Result<(), Error> {
 		.build();
 
 	let client = get_db_client().await?;
-
 	let data: Vec<(String, String)> = client
 		.query(r#"SELECT "User".name, "User".email FROM "User";"#, &[])
 		.await?
@@ -40,22 +43,27 @@ async fn main() -> Result<(), Error> {
 		})
 		.collect();
 
-	warp::serve(
-		warp::path!("send_mail")
-			.map(move || {
-				data.iter()
-					.for_each(|(name, email)| send_mail(name, email, &mailer));
-				"ok"
-			})
-			.with(warp::cors().allow_any_origin()),
-	)
-	.run((
-		IpAddr::from_str("::0").unwrap(),
-		env!("PORT")
-			.parse()
-			.unwrap_or_else(|_| panic!("$SERVER_PORT could not be parsed to integer")),
-	))
-	.await;
+	let mailer_clone = mailer.clone();
+	let path = warp::path!("send_mail")
+		.map(move || {
+			data.iter()
+				.for_each(|(name, email)| send_mail(name, email, &mailer_clone));
+			"ok"
+		})
+		.or(warp::path!("teste").map(move || {
+			send_mail("Augusto", "augustomp@concordiasl.com.br", &mailer);
+			"ok"
+		}))
+		.with(warp::cors().allow_any_origin());
+
+	warp::serve(path)
+		.run((
+			IpAddr::from_str("::0").unwrap(),
+			env!("PORT")
+				.parse()
+				.unwrap_or_else(|_| panic!("$SERVER_PORT could not be parsed to integer")),
+		))
+		.await;
 
 	Ok(())
 }
@@ -74,16 +82,21 @@ async fn get_db_client() -> Result<Client, Error> {
 }
 
 fn send_mail(name: &str, email: &str, mailer: &SmtpTransport) {
-	let template = include_str!("../template.html").replace("${nome}", name);
+	let template = TEMPLATE.replace("${nome}", name);
+
 	let message = Message::builder()
 		.from(
 			format!("Mind Help <{}>", env!("OUR_EMAIL"))
 				.parse()
 				.unwrap(),
 		)
-		.to(format!("Hei <{}>", email).parse().unwrap())
-		.subject("Happy new year")
-		.body(template)
+		.to(format!("{name} <{email}>").parse().unwrap())
+		.subject("newsletter")
+		.singlepart(
+			SinglePart::builder()
+				.header(ContentType::TEXT_HTML)
+				.body(template),
+		)
 		.unwrap();
 
 	match mailer.send(&message) {
